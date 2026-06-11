@@ -1,0 +1,337 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum Priority {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_COMMENT
+  TASK_DUE_SOON
+  TASK_OVERDUE
+  MENTION
+  INVITE
+  SPRINT_SUMMARY
+}
+
+// ─── ORGANIZATION ─────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  plan      String   @default("free")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  OrganizationMember[]
+  projects Project[]
+  invites  Invite[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  role           Role         @default(MEMBER)
+  joinedAt       DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("organization_members")
+}
+
+// ─── USER ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  avatarUrl    String?
+  passwordHash String?
+  provider     String?
+  providerId   String?
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships   OrganizationMember[]
+  assignedTasks Task[]               @relation("AssignedTasks")
+  createdTasks  Task[]               @relation("CreatedTasks")
+  comments      Comment[]
+  notifications Notification[]
+  activityLogs  ActivityLog[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ─── INVITE ───────────────────────────────────────────────────────────────────
+
+model Invite {
+  id             String    @id @default(uuid())
+  organizationId String
+  email          String
+  role           Role      @default(MEMBER)
+  token          String    @unique @default(uuid())
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("invites")
+}
+
+// ─── PROJECT ──────────────────────────────────────────────────────────────────
+
+model Project {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  color          String   @default("#6366f1")
+  icon           String?
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  boards       Board[]
+  sprints      Sprint[]
+  labels       Label[]
+
+  @@map("projects")
+}
+
+// ─── BOARD ────────────────────────────────────────────────────────────────────
+
+model Board {
+  id        String   @id @default(uuid())
+  projectId String
+  name      String
+  position  Int
+  color     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@map("boards")
+}
+
+// ─── SPRINT ───────────────────────────────────────────────────────────────────
+
+model Sprint {
+  id          String    @id @default(uuid())
+  projectId   String
+  name        String
+  goal        String?
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean   @default(false)
+  isCompleted Boolean   @default(false)
+  aiSummary   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@map("sprints")
+}
+
+// ─── TASK ─────────────────────────────────────────────────────────────────────
+
+model Task {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  boardId            String
+  sprintId           String?
+  parentTaskId       String?
+  title              String
+  description        String?
+  status             TaskStatus @default(TODO)
+  priority           Priority   @default(NONE)
+  position           Float
+  dueDate            DateTime?
+  estimatedHours     Float?
+  actualHours        Float?
+  assigneeId         String?
+  createdById        String
+  aiBreakdown        Json?
+  aiSuggestedPriority Priority?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  board        Board         @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  sprint       Sprint?       @relation(fields: [sprintId], references: [id])
+  parentTask   Task?         @relation("SubTasks", fields: [parentTaskId], references: [id])
+  subTasks     Task[]        @relation("SubTasks")
+  assignee     User?         @relation("AssignedTasks", fields: [assigneeId], references: [id])
+  createdBy    User          @relation("CreatedTasks", fields: [createdById], references: [id])
+  comments     Comment[]
+  attachments  Attachment[]
+  labels       TaskLabel[]
+  activityLogs ActivityLog[]
+  blockedBy    TaskDependency[] @relation("BlockedTask")
+  blocking     TaskDependency[] @relation("BlockingTask")
+
+  @@index([organizationId])
+  @@index([boardId])
+  @@index([assigneeId])
+  @@map("tasks")
+}
+
+model TaskDependency {
+  id             String @id @default(uuid())
+  blockingTaskId String
+  blockedTaskId  String
+
+  blockingTask Task @relation("BlockingTask", fields: [blockingTaskId], references: [id], onDelete: Cascade)
+  blockedTask  Task @relation("BlockedTask", fields: [blockedTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([blockingTaskId, blockedTaskId])
+  @@map("task_dependencies")
+}
+
+// ─── LABEL ────────────────────────────────────────────────────────────────────
+
+model Label {
+  id        String @id @default(uuid())
+  projectId String
+  name      String
+  color     String
+
+  project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   TaskLabel[]
+
+  @@map("labels")
+}
+
+model TaskLabel {
+  taskId  String
+  labelId String
+
+  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, labelId])
+  @@map("task_labels")
+}
+
+// ─── COMMENT ──────────────────────────────────────────────────────────────────
+
+model Comment {
+  id        String   @id @default(uuid())
+  taskId    String
+  authorId  String
+  content   String
+  isEdited  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+// ─── ATTACHMENT ───────────────────────────────────────────────────────────────
+
+model Attachment {
+  id         String   @id @default(uuid())
+  taskId     String
+  fileName   String
+  fileSize   Int
+  fileType   String
+  s3Key      String
+  s3Url      String
+  uploadedAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+// ─── ACTIVITY LOG ─────────────────────────────────────────────────────────────
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  taskId    String
+  userId    String
+  action    String
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activity_logs")
+}
+
+// ─── NOTIFICATION ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false)
+  link      String?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
