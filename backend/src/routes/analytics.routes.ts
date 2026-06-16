@@ -1,7 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { prisma } from '../config/prisma'
 import { requireOrgAccess } from '../middleware/auth'
-import { cache, cacheKeys } from '../config/redis'
 
 const router = Router()
 
@@ -11,74 +10,127 @@ router.use(requireOrgAccess())
 router.get('/overview', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const orgId = req.organizationId!
-    const cacheKey = cacheKeys.analytics(orgId, 'overview')
-    const cached = await cache.get(cacheKey)
-    if (cached) return res.json({ success: true, data: cached, cached: true })
+    const now   = new Date()
 
-    const now = new Date()
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    // This week window
+    const thisWeekStart = new Date(now)
+    thisWeekStart.setDate(now.getDate() - 7)
 
-    const [totalTasks, completedTasks, inProgressTasks, overdueTasks, lastWeekCompleted] = await Promise.all([
-      prisma.task.count({ where: { organizationId: orgId } }),
-      prisma.task.count({ where: { organizationId: orgId, status: 'DONE' } }),
-      prisma.task.count({ where: { organizationId: orgId, status: 'IN_PROGRESS' } }),
-      prisma.task.count({ where: { organizationId: orgId, dueDate: { lt: now }, status: { notIn: ['DONE', 'CANCELLED'] } } }),
-      prisma.task.count({ where: { organizationId: orgId, status: 'DONE', updatedAt: { gte: weekAgo } } }),
-    ])
+    // Last week window
+    const lastWeekStart = new Date(now)
+    lastWeekStart.setDate(now.getDate() - 14)
+    const lastWeekEnd = new Date(thisWeekStart)
 
-    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
-    const prevWeekCompleted = Math.max(1, lastWeekCompleted - Math.floor(Math.random() * 3))
-    const velocityChange = Math.round(((lastWeekCompleted - prevWeekCompleted) / prevWeekCompleted) * 100)
-
-    const overview = {
+    const [
       totalTasks,
       completedTasks,
       inProgressTasks,
       overdueTasks,
-      completionRate,
-      velocityChange,
-      avgBlockedDays: 1.2,
+      thisWeekCompleted,
+      lastWeekCompleted,
+    ] = await Promise.all([
+      prisma.task.count({ where: { organizationId: orgId } }),
+
+      prisma.task.count({ where: { organizationId: orgId, status: 'DONE' } }),
+
+      prisma.task.count({
+        where: { organizationId: orgId, status: { in: ['IN_PROGRESS', 'IN_REVIEW'] } },
+      }),
+
+      prisma.task.count({
+        where: {
+          organizationId: orgId,
+          dueDate: { lt: now },
+          status: { notIn: ['DONE', 'CANCELLED'] },
+        },
+      }),
+
+      prisma.task.count({
+        where: {
+          organizationId: orgId,
+          status: 'DONE',
+          updatedAt: { gte: thisWeekStart },
+        },
+      }),
+
+      prisma.task.count({
+        where: {
+          organizationId: orgId,
+          status: 'DONE',
+          updatedAt: { gte: lastWeekStart, lt: lastWeekEnd },
+        },
+      }),
+    ])
+
+    const completionRate  = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+
+    // Velocity: % change from last week to this week
+    // If last week = 0, avoid divide by zero — show 0 not +100%
+    let velocityChange = 0
+    if (lastWeekCompleted > 0) {
+      velocityChange = Math.round(((thisWeekCompleted - lastWeekCompleted) / lastWeekCompleted) * 100)
+    } else if (thisWeekCompleted > 0) {
+      // First week of activity — just show the count, not a percentage
+      velocityChange = thisWeekCompleted
     }
 
-    await cache.set(cacheKey, overview, 300)
-    res.json({ success: true, data: overview })
+    // Cap at reasonable bounds so it doesn't show +1000%
+    velocityChange = Math.max(-100, Math.min(200, velocityChange))
+
+    res.json({
+      success: true,
+      data: {
+        totalTasks,
+        completedTasks,
+        inProgressTasks,
+        overdueTasks,
+        completionRate,
+        velocityChange,
+        avgBlockedDays: 0,
+      },
+    })
   } catch (err) { next(err) }
 })
 
-// GET /api/analytics/velocity
+// GET /api/analytics/velocity — daily created vs completed for last 7 days
 router.get('/velocity', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const orgId = req.organizationId!
-    const days = 7
-
+    const days  = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     const result = []
-    for (let i = days - 1; i >= 0; i--) {
-      const start = new Date()
-      start.setDate(start.getDate() - i)
-      start.setHours(0, 0, 0, 0)
-      const end = new Date(start)
-      end.setHours(23, 59, 59, 999)
 
-      const [completed, created] = await Promise.all([
-        prisma.task.count({ where: { organizationId: orgId, status: 'DONE', updatedAt: { gte: start, lte: end } } }),
-        prisma.task.count({ where: { organizationId: orgId, createdAt: { gte: start, lte: end } } }),
+    for (let i = 6; i >= 0; i--) {
+      const date      = new Date()
+      date.setDate(date.getDate() - i)
+      date.setHours(0, 0, 0, 0)
+
+      const nextDate = new Date(date)
+      nextDate.setDate(date.getDate() + 1)
+
+      const [created, completed] = await Promise.all([
+        prisma.task.count({
+          where: { organizationId: orgId, createdAt: { gte: date, lt: nextDate } },
+        }),
+        prisma.task.count({
+          where: {
+            organizationId: orgId,
+            status: 'DONE',
+            updatedAt: { gte: date, lt: nextDate },
+          },
+        }),
       ])
 
-      result.push({
-        date: start.toLocaleDateString('en-US', { weekday: 'short' }),
-        completed,
-        created,
-      })
+      result.push({ date: days[date.getDay()], created, completed })
     }
 
     res.json({ success: true, data: result })
   } catch (err) { next(err) }
 })
 
-// GET /api/analytics/members
+// GET /api/analytics/members — per-member task stats
 router.get('/members', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orgId = req.organizationId!
+    const orgId   = req.organizationId!
 
     const members = await prisma.organizationMember.findMany({
       where: { organizationId: orgId },
@@ -86,16 +138,23 @@ router.get('/members', async (req: Request, res: Response, next: NextFunction) =
     })
 
     const stats = await Promise.all(
-      members.map(async (m) => {
+      members.map(async m => {
         const [assigned, completed] = await Promise.all([
           prisma.task.count({ where: { organizationId: orgId, assigneeId: m.userId } }),
           prisma.task.count({ where: { organizationId: orgId, assigneeId: m.userId, status: 'DONE' } }),
         ])
-        return { userId: m.userId, name: m.user.name, avatarUrl: m.user.avatarUrl, assigned, completed }
+        return {
+          userId:    m.userId,
+          name:      m.user.name,
+          avatarUrl: m.user.avatarUrl,
+          assigned,
+          completed,
+        }
       })
     )
 
-    res.json({ success: true, data: stats })
+    // Only return members with at least 1 assigned task
+    res.json({ success: true, data: stats.filter(s => s.assigned > 0) })
   } catch (err) { next(err) }
 })
 
