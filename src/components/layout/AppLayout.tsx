@@ -23,10 +23,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Sidebar onOpenCmd={() => setCmdOpen(true)} />
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, overflow: 'hidden' }}>
         <Navbar onOpenCmd={() => setCmdOpen(true)} />
-        <main style={{
-          flex: 1, overflowY: 'auto', background: C.bg0,
-          backgroundImage: `radial-gradient(ellipse at 0% 0%, rgba(124,58,237,0.03) 0%, transparent 50%)`,
-        }}>
+        <main style={{ flex: 1, overflowY: 'auto', background: C.bg0 }}>
           {children}
         </main>
       </div>

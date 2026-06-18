@@ -16,7 +16,6 @@ function generateTokens(userId: string, email: string) {
   return { token, refreshToken }
 }
 
-// POST /api/auth/register
 router.post(
   '/register',
   [
@@ -59,12 +58,10 @@ router.post(
           user,
           token,
           refreshToken,
-          organizations: memberships.map((m) => ({ ...m.organization, role: m.role })),
+          organizations: memberships.map(m => ({ ...m.organization, role: m.role })),
         },
       })
-    } catch (err) {
-      next(err)
-    }
+    } catch (err) { next(err) }
   }
 )
 
@@ -109,16 +106,14 @@ router.post(
           user: safeUser,
           token,
           refreshToken,
-          organizations: memberships.map((m) => ({ ...m.organization, role: m.role })),
+          organizations: memberships.map(m => ({ ...m.organization, role: m.role })),
         },
       })
-    } catch (err) {
-      next(err)
-    }
+    } catch (err) { next(err) }
   }
 )
 
-// POST /api/auth/refresh
+// POST /api/auth/refresh — single, uses deleteMany to avoid crash
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { refreshToken } = req.body
@@ -130,7 +125,6 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     const payload = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as { userId: string; email: string }
     const { token: newToken, refreshToken: newRefresh } = generateTokens(payload.userId, payload.email)
 
-    // Use deleteMany instead of delete to avoid crash if already deleted
     await prisma.refreshToken.deleteMany({ where: { token: refreshToken } })
     await prisma.refreshToken.create({
       data: {
@@ -141,39 +135,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     })
 
     res.json({ success: true, data: { token: newToken, refreshToken: newRefresh } })
-  } catch (err) {
-    next(err)
-  }
-})
-// GET /api/auth/me
-router.get('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      select: { id: true, name: true, email: true, avatarUrl: true, isVerified: true, createdAt: true },
-    })
-    res.json({ success: true, data: user })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// PATCH /api/auth/me
-router.patch('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { name, avatarUrl } = req.body
-    const user = await prisma.user.update({
-      where: { id: req.user!.id },
-      data: {
-        ...(name && { name }),
-        ...(avatarUrl && { avatarUrl }),
-      },
-      select: { id: true, name: true, email: true, avatarUrl: true, isVerified: true, createdAt: true },
-    })
-    res.json({ success: true, data: user })
-  } catch (err) {
-    next(err)
-  }
+  } catch (err) { next(err) }
 })
 
 // POST /api/auth/logout
@@ -184,12 +146,37 @@ router.post('/logout', authenticate, async (req: Request, res: Response, next: N
       await prisma.refreshToken.deleteMany({ where: { token: refreshToken } })
     }
     res.json({ success: true, message: 'Logged out' })
-  } catch (err) {
-    next(err)
-  }
+  } catch (err) { next(err) }
 })
 
-// PATCH /api/auth/me/password
+// GET /api/auth/me
+router.get('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { id: true, name: true, email: true, avatarUrl: true, isVerified: true, createdAt: true },
+    })
+    res.json({ success: true, data: user })
+  } catch (err) { next(err) }
+})
+
+// PATCH /api/auth/me — update name / avatar
+router.patch('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, avatarUrl } = req.body
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: {
+        ...(name      && { name }),
+        ...(avatarUrl && { avatarUrl }),
+      },
+      select: { id: true, name: true, email: true, avatarUrl: true, isVerified: true, createdAt: true },
+    })
+    res.json({ success: true, data: user })
+  } catch (err) { next(err) }
+})
+
+// PATCH /api/auth/me/password — change password
 router.patch('/me/password', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { currentPassword, newPassword } = req.body
@@ -202,7 +189,7 @@ router.patch('/me/password', authenticate, async (req: Request, res: Response, n
     }
 
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } })
-    if (!user || !user.passwordHash) throw new AppError('User not found', 404)
+    if (!user?.passwordHash) throw new AppError('User not found', 404)
 
     const valid = await bcrypt.compare(currentPassword, user.passwordHash)
     if (!valid) throw new AppError('Current password is incorrect', 401)
@@ -217,9 +204,7 @@ router.patch('/me/password', authenticate, async (req: Request, res: Response, n
     await prisma.refreshToken.deleteMany({ where: { userId: req.user!.id } })
 
     res.json({ success: true, message: 'Password changed successfully' })
-  } catch (err) {
-    next(err)
-  }
+  } catch (err) { next(err) }
 })
 
 export default router
