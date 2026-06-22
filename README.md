@@ -1,73 +1,73 @@
-# React + TypeScript + Vite
+# TaskFlow
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A task management platform I built to learn how production SaaS applications actually work under the hood. Not just a todo app — multi-tenant workspaces, role-based permissions, real-time updates, and AI features built on top of a proper backend architecture.
 
-Currently, two official plugins are available:
+## What it does
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Teams can create workspaces, invite members with different roles, and manage work on Kanban boards. Everything updates in real time. There's an AI assistant powered by Groq (Llama 3.3 70B) that can answer questions about your tasks and create new ones from plain English.
 
-## React Compiler
+Roles: Owner → Admin → Manager → Member → Viewer. Each role has different permissions enforced on both the frontend and backend.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+AI features:
+- Chat with AI about your tasks ("what's overdue?", "show team velocity")
+- Create tasks by describing them in plain English
+- Analytics insights generated from real workspace data
 
-## Expanding the ESLint configuration
+## Tech stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Frontend
+- React 19, TypeScript, Vite
+- TanStack Query v5 for data fetching and caching
+- Zustand for state management
+- dnd-kit for drag and drop
+- Socket.io client for real-time updates
+- Recharts for analytics visualizations
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Backend
+- Node.js, Express, TypeScript
+- Prisma ORM with PostgreSQL
+- Redis for caching and session management
+- Socket.io for real-time events
+- BullMQ for background job queues
+- JWT authentication with refresh token rotation
+- Groq SDK for AI (Llama 3.3 70B)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Infrastructure
+- Docker Compose for local PostgreSQL and Redis
+- Multi-tenant data isolation at the database level
+- Rate limiting on all routes, stricter limits on AI endpoints
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Running locally
+
+You need Node.js 18+ and Docker Desktop.
+
+```bash
+# Clone
+git clone https://github.com/smit-vaddoriya/Taskflow.git
+cd Taskflow
+
+# Start database and Redis
+docker compose up -d postgres redis
+
+# Backend
+cd backend
+cp ../.env.example .env
+# Add your GROQ_API_KEY to .env (free at console.groq.com)
+npm install
+npx prisma migrate dev
+npx prisma db seed
+npm run dev
+
+# Frontend (new terminal)
+cd ..
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open `http://localhost:3001`
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Demo account: `demo@taskflow.com` / `password123`
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Environment variables
+
+Copy `.env.example` to `backend/.env`:
